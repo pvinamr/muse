@@ -1,56 +1,76 @@
 from fastapi import FastAPI
-from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
+from sqlmodel import SQLModel, Field, Session, create_engine, select
 
 app = FastAPI()
 
+DATABASE_URL = "sqlite:///./muse.db"
+engine = create_engine(DATABASE_URL, echo=False)
 
-#model defines what clients must send when creating a new clip. type is the kind of clip (text, url, image) and the actual content. url and title are optional fields.
-class ClipCreate(BaseModel):
+
+#metadata is the blueprint based on the information clipped. create_all will use the engine to create any tables that do not yet exist in the database
+def create_db_and_tables():
+    SQLModel.metadata.create_all(engine)
+
+#What API starts up, before serving any requests, run this function
+@app.on_event("startup")
+def on_startup():
+    create_db_and_tables()
+
+#what data is required to create a new clip 
+class ClipBase(SQLModel):
     type: str
     content: str
     url: Optional[str] = None
     title: Optional[str] = None
-    
-#model represents what a clip looks like after being saved. id is an auto-incremented unique identifier, created_at is a timestamp
-class Clip(BaseModel):
+
+#defines fields in the table when creating a new clip
+class Clip(ClipBase, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class ClipCreate(ClipBase):
+    pass
+
+#output model when reading a clip
+class ClipRead(ClipBase):
     id: int
-    type: str
-    content: str
-    url: Optional[str] = None
-    title: Optional[str] = None
     created_at: datetime
-    
-    
-#temp "database" to store clips in memory. next_id increments with each new clip
-clips: List[Clip] = []
-next_id = 1
-    
 
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
 
-@app.post("/clips", response_model=Clip)
-def create_clip(payload: ClipCreate):
-    global next_id
-    
-    clip = Clip(
-        id = next_id, 
-        type = payload.type,
-        content = payload.content,
-        url = payload.url,
-        title = payload.title,
-        created_at = datetime.utcnow(),
-    )
-    next_id += 1
-    clips.append(clip)
-    return clip
 
-@app.get("/clips", response_model=List[Clip])
+#payload contains what the client sent
+#clip creates an object in memory
+#session creates the database session and adds the relevant clip to the database
+@app.post("/clips", response_model=ClipRead)
+def create_clip(payload: ClipCreate):
+    clip = Clip(
+            type=payload.type,
+            content=payload.content,
+            url=payload.url,
+            title=payload.title,
+        )
+    
+    with Session(engine) as session:
+        session.add(clip)
+        session.commit()
+        session.refresh(clip)
+        return clip
+
+
+#opens a DB session, selects all clips sorted by timestamp, returs them as a list 
+@app.get("/clips", response_model=List[ClipRead])
 def list_clips():
-    return sorted(clips, key=lambda c: c.created_at, reverse=True)
+    with Session(engine) as session:
+        statement = select(Clip).order_by(Clip.created_at.desc())
+        results = session.exec(statement).all()
+        return results
+        
+        
 
 
 
