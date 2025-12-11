@@ -28,6 +28,7 @@ class ClipBase(SQLModel):
 #defines fields in the table when creating a new clip
 class Clip(ClipBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    summary: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class ClipCreate(ClipBase):
@@ -36,6 +37,7 @@ class ClipCreate(ClipBase):
 #output model when reading a clip
 class ClipRead(ClipBase):
     id: int
+    summary: Optional[str]
     created_at: datetime
 
 @app.get("/health")
@@ -55,6 +57,8 @@ def create_clip(payload: ClipCreate):
             title=payload.title,
         )
     
+    clip.summary = enrich_clip_summary(clip.content)
+    
     with Session(engine) as session:
         session.add(clip)
         session.commit()
@@ -69,6 +73,11 @@ def list_clips():
         statement = select(Clip).order_by(Clip.created_at.desc())
         results = session.exec(statement).all()
         return results
+
+
+def enrich_clip_summary(content: str) -> str:
+    # placeholder. make this an LLM call later
+    return content[:60] + "..." if len(content) > 60 else content
         
         
 
