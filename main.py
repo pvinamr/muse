@@ -2,12 +2,19 @@ from fastapi import FastAPI
 from typing import List, Optional
 from datetime import datetime
 from sqlmodel import SQLModel, Field, Session, create_engine, select
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
 DATABASE_URL = "sqlite:///./muse.db"
 engine = create_engine(DATABASE_URL, echo=False)
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # fine for local dev
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 #metadata is the blueprint based on the information clipped. create_all will use the engine to create any tables that do not yet exist in the database
 def create_db_and_tables():
@@ -57,8 +64,6 @@ def create_clip(payload: ClipCreate):
             title=payload.title,
         )
     
-    clip.summary = enrich_clip_summary(clip.content)
-    
     with Session(engine) as session:
         session.add(clip)
         session.commit()
@@ -75,9 +80,9 @@ def list_clips():
         return results
 
 
-def enrich_clip_summary(content: str) -> str:
+#def enrich_clip_summary(content: str) -> str:
     # placeholder. make this an LLM call later
-    return content[:60] + "..." if len(content) > 60 else content
+    #return content[:60] + "..." if len(content) > 60 else content
         
         
 
