@@ -3,11 +3,59 @@ from typing import List, Optional
 from datetime import datetime
 from sqlmodel import SQLModel, Field, Session, create_engine, select
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 app = FastAPI()
 
 DATABASE_URL = "sqlite:///./muse.db"
 engine = create_engine(DATABASE_URL, echo=False)
+
+def create_fts():
+    """
+    Creates an FTS5 virtual table and triggers to keep it in sync with clips.
+    Also backfills existing clips into the FTS table.
+    """
+    with engine.connect() as conn:
+        # 1) FTS table (content is indexed)
+        conn.execute(text("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS clips_fts
+            USING fts5(content, title, url, content='clip', content_rowid='id');
+        """))
+
+        # 2) Triggers to keep FTS in sync
+        conn.execute(text("""
+            CREATE TRIGGER IF NOT EXISTS clip_ai AFTER INSERT ON clip BEGIN
+              INSERT INTO clips_fts(rowid, content, title, url)
+              VALUES (new.id, new.content, new.title, new.url);
+            END;
+        """))
+
+        conn.execute(text("""
+            CREATE TRIGGER IF NOT EXISTS clip_ad AFTER DELETE ON clip BEGIN
+              INSERT INTO clips_fts(clips_fts, rowid, content, title, url)
+              VALUES ('delete', old.id, old.content, old.title, old.url);
+            END;
+        """))
+
+        conn.execute(text("""
+            CREATE TRIGGER IF NOT EXISTS clip_au AFTER UPDATE ON clip BEGIN
+              INSERT INTO clips_fts(clips_fts, rowid, content, title, url)
+              VALUES ('delete', old.id, old.content, old.title, old.url);
+              INSERT INTO clips_fts(rowid, content, title, url)
+              VALUES (new.id, new.content, new.title, new.url);
+            END;
+        """))
+
+        # 3) Backfill existing rows (safe to run multiple times)
+        conn.execute(text("""
+            INSERT INTO clips_fts(rowid, content, title, url)
+            SELECT id, content, title, url
+            FROM clip
+            WHERE id NOT IN (SELECT rowid FROM clips_fts);
+        """))
+
+        conn.commit()
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,6 +72,7 @@ def create_db_and_tables():
 @app.on_event("startup")
 def on_startup():
     create_db_and_tables()
+    create_fts()
 
 #what data is required to create a new clip 
 class ClipBase(SQLModel):
@@ -78,7 +127,36 @@ def list_clips():
         statement = select(Clip).order_by(Clip.created_at.desc())
         results = session.exec(statement).all()
         return results
+    
 
+@app.get("/search", response_model=List[ClipRead])
+def search_clips(q: str, limit: int = 50):
+    with Session(engine) as session:
+        # 1) FTS query → get matching clip IDs
+        stmt = text("""
+            SELECT rowid
+            FROM clips_fts
+            WHERE clips_fts MATCH :q
+            ORDER BY bm25(clips_fts)
+            LIMIT :limit;
+        """).bindparams(q=q, limit=limit)
+
+        id_rows = session.exec(stmt).all()
+        ids = [row[0] for row in id_rows]
+
+        if not ids:
+            return []
+
+        # 2) Fetch actual Clip objects
+        clips = session.exec(
+            select(Clip).where(Clip.id.in_(ids))
+        ).all()
+
+        # 3) Preserve FTS order
+        order = {clip_id: i for i, clip_id in enumerate(ids)}
+        clips.sort(key=lambda c: order.get(c.id, 10**9))
+
+        return clips
 
 #def enrich_clip_summary(content: str) -> str:
     # placeholder. make this an LLM call later
