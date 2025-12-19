@@ -59,7 +59,7 @@ def create_fts():
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # fine for local dev
+    allow_origins=["http://localhost:5173"],  # fine for local dev
     allow_methods=["*"],
     allow_headers=["*"],
 )
