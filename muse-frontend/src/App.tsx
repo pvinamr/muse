@@ -38,44 +38,90 @@ export default function App() {
       .then((data: Clip[]) => {
         if (cancelled) return;
         setClips(data);
-        setSelected((prev) => (prev ? data.find((c) => c.id === prev.id) ?? data[0] ?? null : data[0] ?? null));
+        setSelected((prev) => {
+          if (!prev) return data[0] ?? null;
+          return data.find((c) => c.id === prev.id) ?? data[0] ?? null;
+        });
       })
-      .catch((e) => !cancelled && setError(String(e)))
-      .finally(() => !cancelled && setLoading(false));
+      .catch((e) => {
+        if (cancelled) return;
+        setError(String(e));
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setLoading(false);
+      });
 
     return () => {
       cancelled = true;
     };
   }, [endpoint]);
 
+  const headerSubtitle = loading
+    ? "Loading…"
+    : query.trim()
+    ? `Results for “${query.trim()}”`
+    : "Recent clips";
+
   return (
-    <div style={{ display: "flex", height: "100vh", fontFamily: "system-ui, sans-serif" }}>
-      <div style={{ width: 420, borderRight: "1px solid #eee", display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: 12 }}>
-          <div style={{ fontSize: 18, fontWeight: 700 }}>Muse</div>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "360px 1fr",
+        height: "100vh",
+        fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif",
+        background: "#ffffff",
+        color: "#1f2937",
+      }}
+    >
+      {/* LEFT: Sidebar */}
+      <div
+        style={{
+          borderRight: "1px solid #e5e7eb",
+          background: "#f9fafb",
+          display: "flex",
+          flexDirection: "column",
+          minWidth: 0,
+        }}
+      >
+        <div style={{ padding: 16 }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: "#111827" }}>Muse</div>
+
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search clips…"
             style={{
               width: "100%",
-              marginTop: 10,
+              marginTop: 12,
               padding: "10px 12px",
-              borderRadius: 10,
-              border: "1px solid #ddd",
+              borderRadius: 12,
+              border: "1px solid #d1d5db",
+              background: "#ffffff",
+              color: "#111827",
+              fontSize: 14,
               outline: "none",
+              boxSizing: "border-box",
             }}
           />
-          <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
-            {loading ? "Loading…" : query.trim() ? `Results for “${query.trim()}”` : "Recent clips"}
-            {error ? ` — ${error}` : null}
+
+          <div style={{ marginTop: 10, fontSize: 12, color: "#6b7280" }}>
+            {headerSubtitle}
+            {error ? <span style={{ color: "#b91c1c" }}> — {error}</span> : null}
           </div>
         </div>
 
-        <div style={{ overflowY: "auto", padding: 8 }}>
+        <div style={{ overflowY: "auto", padding: "0 12px 12px" }}>
           {clips.map((c) => {
             const isActive = selected?.id === c.id;
-            const title = c.title || (c.url ? new URL(c.url).hostname : "Untitled");
+
+            let displayTitle = c.title ?? "Untitled";
+            try {
+              if (!c.title && c.url) displayTitle = new URL(c.url).hostname;
+            } catch {
+              // ignore URL parse errors
+            }
+
             const preview = c.content.length > 120 ? c.content.slice(0, 120) + "…" : c.content;
 
             return (
@@ -85,47 +131,98 @@ export default function App() {
                 style={{
                   width: "100%",
                   textAlign: "left",
-                  padding: 12,
-                  marginBottom: 8,
-                  borderRadius: 12,
-                  border: isActive ? "1px solid #bbb" : "1px solid #eee",
-                  background: isActive ? "#f6f6f6" : "white",
+                  padding: 14,
+                  marginTop: 10,
+                  borderRadius: 14,
+                  border: isActive ? "1px solid #c7d2fe" : "1px solid #e5e7eb",
+                  background: isActive ? "#eef2ff" : "#ffffff",
                   cursor: "pointer",
+                  transition: "background 0.15s ease, border 0.15s ease",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
                 }}
               >
-                <div style={{ fontWeight: 650, fontSize: 14, marginBottom: 6 }}>{title}</div>
-                <div style={{ fontSize: 12, color: "#555", lineHeight: 1.35 }}>{preview}</div>
-                <div style={{ fontSize: 11, color: "#888", marginTop: 8 }}>
+                <div
+                  style={{
+                    fontWeight: 700,
+                    fontSize: 13,
+                    color: "#111827",
+                    marginBottom: 6,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                  title={displayTitle}
+                >
+                  {displayTitle}
+                </div>
+
+                <div style={{ fontSize: 12, color: "#4b5563", lineHeight: 1.35 }}>
+                  {preview}
+                </div>
+
+                <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 10 }}>
                   #{c.id} • {new Date(c.created_at).toLocaleString()}
                 </div>
               </button>
             );
           })}
-          {(!loading && clips.length === 0) ? (
-            <div style={{ padding: 12, color: "#666" }}>No results.</div>
+
+          {!loading && clips.length === 0 ? (
+            <div
+              style={{
+                marginTop: 14,
+                padding: 12,
+                borderRadius: 12,
+                border: "1px dashed #d1d5db",
+                color: "#6b7280",
+                background: "#ffffff",
+              }}
+            >
+              No results.
+            </div>
           ) : null}
         </div>
       </div>
 
-      <div style={{ flex: 1, padding: 18, overflowY: "auto" }}>
+      {/* RIGHT: Detail */}
+      <div
+        style={{
+          padding: 32,
+          overflowY: "auto",
+          background: "#ffffff",
+          minWidth: 0,
+        }}
+      >
         {!selected ? (
-          <div style={{ color: "#666" }}>Select a clip.</div>
+          <div style={{ color: "#6b7280" }}>Select a clip.</div>
         ) : (
           <>
-            <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 8 }}>
+            <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 10, color: "#111827" }}>
               {selected.title || "Untitled"}
             </div>
 
             {selected.url ? (
-              <div style={{ marginBottom: 14 }}>
-                <a href={selected.url} target="_blank" rel="noreferrer" style={{ color: "#0b57d0" }}>
+              <div style={{ marginBottom: 18, fontSize: 13 }}>
+                <a
+                  href={selected.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: "#2563eb", textDecoration: "none", fontWeight: 600 }}
+                >
                   Open source
                 </a>
-                <span style={{ color: "#999" }}> — {selected.url}</span>
+                <span style={{ color: "#9ca3af" }}> — {selected.url}</span>
               </div>
             ) : null}
 
-            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.55, fontSize: 14 }}>
+            <div
+              style={{
+                whiteSpace: "pre-wrap",
+                lineHeight: 1.7,
+                fontSize: 15,
+                color: "#374151",
+              }}
+            >
               {selected.content}
             </div>
           </>
