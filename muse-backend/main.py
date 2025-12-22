@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlmodel import SQLModel, Field, Session, create_engine, select
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
+from fastapi import HTTPException
 
 app = FastAPI()
 
@@ -157,6 +158,18 @@ def search_clips(q: str, limit: int = 50):
         clips.sort(key=lambda c: order.get(c.id, 10**9))
 
         return clips
+
+@app.delete("/clips/{clip_id}")
+def delete_clip(clip_id: int):
+    with Session(engine) as session:
+        clip = session.get(Clip, clip_id)
+        if not clip:
+            raise HTTPException(status_code=404, detail="Clip not found")
+
+        session.delete(clip)
+        session.commit()
+
+    return {"ok": True}
 
 #def enrich_clip_summary(content: str) -> str:
     # placeholder. make this an LLM call later

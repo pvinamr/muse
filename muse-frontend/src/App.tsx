@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Clip = {
   id: number;
@@ -12,12 +12,19 @@ type Clip = {
 
 const API_BASE = "http://127.0.0.1:8000";
 
+type ContextMenuState =
+  | { open: false }
+  | { open: true; x: number; y: number; clipId: number };
+
 export default function App() {
   const [query, setQuery] = useState("");
   const [clips, setClips] = useState<Clip[]>([]);
   const [selected, setSelected] = useState<Clip | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [menu, setMenu] = useState<ContextMenuState>({ open: false });
+
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   const endpoint = useMemo(() => {
     const q = query.trim();
@@ -57,6 +64,52 @@ export default function App() {
     };
   }, [endpoint]);
 
+  // Close menu on click outside / escape
+  useEffect(() => {
+    function onMouseDown(e: MouseEvent) {
+      if (!menu.open) return;
+      const target = e.target as Node;
+      if (menuRef.current && !menuRef.current.contains(target)) {
+        setMenu({ open: false });
+      }
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setMenu({ open: false });
+    }
+    window.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menu.open]);
+
+  async function deleteClip(clipId: number) {
+    // Optimistic UI update
+    setMenu({ open: false });
+
+    setClips((prev) => prev.filter((c) => c.id !== clipId));
+    setSelected((prev) => {
+      if (!prev || prev.id !== clipId) return prev;
+      // pick next available after removal
+      const remaining = clips.filter((c) => c.id !== clipId);
+      return remaining[0] ?? null;
+    });
+
+    try {
+      const res = await fetch(`${API_BASE}/clips/${clipId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`DELETE failed (HTTP ${res.status})`);
+    } catch (e) {
+      // If delete failed, refresh data by reloading endpoint
+      setError(String(e));
+      // quick refresh
+      fetch(endpoint)
+        .then((r) => r.json())
+        .then((data: Clip[]) => setClips(data))
+        .catch(() => {});
+    }
+  }
+
   const headerSubtitle = loading
     ? "Loading…"
     : query.trim()
@@ -69,7 +122,8 @@ export default function App() {
         display: "grid",
         gridTemplateColumns: "360px 1fr",
         height: "100vh",
-        fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif",
+        fontFamily:
+          "system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif",
         background: "#ffffff",
         color: "#1f2937",
       }}
@@ -82,6 +136,7 @@ export default function App() {
           display: "flex",
           flexDirection: "column",
           minWidth: 0,
+          position: "relative",
         }}
       >
         <div style={{ padding: 16 }}>
@@ -119,15 +174,21 @@ export default function App() {
             try {
               if (!c.title && c.url) displayTitle = new URL(c.url).hostname;
             } catch {
-              // ignore URL parse errors
+              // ignore
             }
 
-            const preview = c.content.length > 120 ? c.content.slice(0, 120) + "…" : c.content;
+            const preview =
+              c.content.length > 120 ? c.content.slice(0, 120) + "…" : c.content;
 
             return (
               <button
                 key={c.id}
                 onClick={() => setSelected(c)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setSelected(c);
+                  setMenu({ open: true, x: e.clientX, y: e.clientY, clipId: c.id });
+                }}
                 style={{
                   width: "100%",
                   textAlign: "left",
@@ -182,6 +243,48 @@ export default function App() {
             </div>
           ) : null}
         </div>
+
+        {/* Context Menu */}
+        {menu.open ? (
+          <div
+            ref={menuRef}
+            style={{
+              position: "fixed",
+              left: menu.x,
+              top: menu.y,
+              width: 180,
+              background: "#ffffff",
+              border: "1px solid #e5e7eb",
+              borderRadius: 12,
+              boxShadow: "0 10px 25px rgba(0,0,0,0.12)",
+              padding: 6,
+              zIndex: 9999,
+            }}
+          >
+            <button
+              onClick={() => deleteClip(menu.clipId)}
+              style={{
+                width: "100%",
+                textAlign: "left",
+                padding: "10px 10px",
+                borderRadius: 10,
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                color: "#b91c1c",
+                fontWeight: 650,
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = "#fef2f2";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {/* RIGHT: Detail */}
@@ -215,14 +318,7 @@ export default function App() {
               </div>
             ) : null}
 
-            <div
-              style={{
-                whiteSpace: "pre-wrap",
-                lineHeight: 1.7,
-                fontSize: 15,
-                color: "#374151",
-              }}
-            >
+            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.7, fontSize: 15, color: "#374151" }}>
               {selected.content}
             </div>
           </>
